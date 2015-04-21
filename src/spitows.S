@@ -587,28 +587,36 @@ bit1_exit:
 /* 7 +  1  */                                   in rSTATUS3,    _SFR_IO_ADDR(USISR)
 /* 8 +  1  */                                   in rDATA,       _SFR_IO_ADDR(USIDR)    /* loads rDATA */
 /* 9 + 1|2 */                                   sbrc rSTATUS3, USIOIF
-/*10 + 2|0 */                                   rjmp bit0_last_chance
+/*10 + 2|0 */                                   rjmp bit0_another_chance
 /*11 +  1  */                                                                          nop
 /*12 +  1  */                                   in rSTATUS1,    _SFR_IO_ADDR(USISR)
 /*13 +  1  */                                   in rDATA,       _SFR_IO_ADDR(USIDR)
 /*14 +  1  */ out _SFR_IO_ADDR(OUTPORT), rLOW
-/*15 +  1  */                                   ldi rLOOP, TIMEOUT_LOOP_COUNT(TIMEOUT_CYCLES,8)
-trail_timeout_loop:
-/*16 +  1  */                                   dec rLOOP
-/*17 + 1|2 */                                   sbrc rSTATUS1, USIOIF
-/*18 + 2|0 */                                   rjmp bit7_poll
-/*      1  */                                   in rSTATUS1,    _SFR_IO_ADDR(USISR)
-/*      1  */                                   in rDATA,       _SFR_IO_ADDR(USIDR)    /* loads rDATA */
-/*      1  */                                   in rUNUSED,     _SFR_IO_ADDR(USIBR)  /* clears USIOIF in one cycle */
-/*     1|2 */                                   brne trail_timeout_loop
-                                                rjmp wait_for_data
+/*15 + 1|2 */                                   sbrs rSTATUS1, USIOIF
+/*16 + 2|0 */                                   rjmp trail_timeout
+/*17 +  1  */                                   in rUNUSED,     _SFR_IO_ADDR(USIBR)  /* clears USIOIF in one cycle */
+/*18 +  2  */                                   rjmp bit7_poll
 
-bit0_last_chance:
-/*12 +  1  */                                   in rUNUSED, _SFR_IO_ADDR(USIBR)  /* clears USIOIF in one cycle */
-/*13 +  1  */                                   out _SFR_IO_ADDR(OUTPORT), rLOW
-/*14 + 1|2 */                                   sbrc rSTATUS2, USIOIF
-/*15 + 1|0 */                                   mov rDATA, rSHIFTDATA2                 /* loads rDATA */
+bit0_another_chance:
+/*12 + 1|2 */                                   sbrc rSTATUS2, USIOIF
+/*13 + 1|0 */                                   mov rDATA, rSHIFTDATA2                 /* loads rDATA */
+/*14 +  1  */ out _SFR_IO_ADDR(OUTPORT), rLOW
+/*15 +  1  */                                   in rUNUSED, _SFR_IO_ADDR(USIBR)  /* clears USIOIF in one cycle */
 /*16 + 1|2 */                                   sbrc rSTATUS1, USIOIF
 /*17 + 1|0 */                                   mov rDATA, rSHIFTDATA1                 /* loads rDATA */
 /*18 +  2  */                                   rjmp bit7_poll
+
+trail_timeout:
+ldi rLOOP, TIMEOUT_LOOP_COUNT(TIMEOUT_CYCLES,9)
+trail_timeout_loop:
+/* 0 +  1  */ in rSTATUS1,    _SFR_IO_ADDR(USISR)
+/* 1 +  1  */ in rDATA,       _SFR_IO_ADDR(USIDR)
+/* 2 + 1|2 */ sbrc rSTATUS1, USIOIF
+/* 3 + 1|0 */ in rUNUSED,     _SFR_IO_ADDR(USIBR)
+/* 4 + 1|2 */ sbrc rSTATUS1, USIOIF
+/* 5 + 2|0 */ rjmp bit7_poll
+/* 6 +  1  */ dec rLOOP
+/* 7 + 1|2 */ brne trail_timeout_loop
+
+rjmp wait_for_data
 
