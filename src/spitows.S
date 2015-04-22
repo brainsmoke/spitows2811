@@ -1,6 +1,31 @@
 /*
+ * Copyright (c) 2015 Erik Bosman <erik@minemu.org>
+ *
+ * Permission  is  hereby  granted,  free  of  charge,  to  any  person
+ * obtaining  a copy  of  this  software  and  associated documentation
+ * files (the "Software"),  to deal in the Software without restriction,
+ * including  without  limitation  the  rights  to  use,  copy,  modify,
+ * merge, publish, distribute, sublicense, and/or sell copies of the
+ * Software,  and to permit persons to whom the Software is furnished to
+ * do so, subject to the following conditions:
+ *
+ * The  above  copyright  notice  and this  permission  notice  shall be
+ * included  in  all  copies  or  substantial portions  of the Software.
+ *
+ * THE SOFTWARE  IS  PROVIDED  "AS IS", WITHOUT WARRANTY  OF ANY KIND,
+ * EXPRESS OR IMPLIED,  INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY,  FITNESS  FOR  A  PARTICULAR  PURPOSE  AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM,  DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT,  TORT OR OTHERWISE,  ARISING FROM, OUT OF OR IN
+ * CONNECTION  WITH THE SOFTWARE  OR THE USE  OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ * (http://opensource.org/licenses/mit-license.html)
+ *
+ *
  *  SPI compatible (WS2801) to WS2811/WS2812(b) protocol translator
- *  for an attiny85 running at 16MHz (internal OSC, PLL prescaled).
+ *  for an attiny85 running at 16MHz (internal osc, PLL prescaled).
  *
  *  It uses the entire SRAM as circular buffer, bitbanging bytes out
  *  while they come in.  This means the number of LEDs that can be
@@ -28,29 +53,151 @@
  * Set PLL clock source:
  * avrdude -v -c usbtiny -pt85 -U lfuse:w:0xe1:m -U hfuse:w:0xdf:m -U efuse:w:0xff:m
  *
- * Copyright (c) 2015 Erik Bosman <erik@minemu.org>
+ *  = How does it work? =
  *
- * Permission  is  hereby  granted,  free  of  charge,  to  any  person
- * obtaining  a copy  of  this  software  and  associated documentation
- * files (the "Software"),  to deal in the Software without restriction,
- * including  without  limitation  the  rights  to  use,  copy,  modify,
- * merge, publish, distribute, sublicense, and/or sell copies of the
- * Software,  and to permit persons to whom the Software is furnished to
- * do so, subject to the following conditions:
+ *  The main loop consists of three interleaved instruction streams
+ *  divided into 8 parts of 20 cycles, during one loop iteration
+ *  one byte will be output using the WS2811 protocol.  One bit
+ *  during each 20 cycle part.
  *
- * The  above  copyright  notice  and this  permission  notice  shall be
- * included  in  all  copies  or  substantial portions  of the Software.
+ *  == Stream 1: Bit banging ==
  *
- * THE SOFTWARE  IS  PROVIDED  "AS IS", WITHOUT WARRANTY  OF ANY KIND,
- * EXPRESS OR IMPLIED,  INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY,  FITNESS  FOR  A  PARTICULAR  PURPOSE  AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM,  DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT,  TORT OR OTHERWISE,  ARISING FROM, OUT OF OR IN
- * CONNECTION  WITH THE SOFTWARE  OR THE USE  OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ *  The rDATA register holds the byte that needs to be bit-banged.
+ *  The data is transmitted most significant bit first.
  *
- * (http://opensource.org/licenses/mit-license.html)
+ *  It takes 1.25 usec to transmit a one    1     7             21
+ *  or a zero:  During the first cycle      ._____.             ...
+ *  the output is set to high.  during      |     |             .
+ *  the seventh cycle the output is set     |     | transmit 0  .
+ *  to low in case of a zero and in case    |     |_____________.
+ *  of a one this is done during the
+ *  fifteenth cycle.                        1             15    21
+ *                                          ._____________.     ...
+ *  We need to reserve 4 cycles for this.   |             |     .
+ *  One to set the output high, two to      | transmit 1  |     .
+ *  conditionally set the output to low at  |             |_____.
+ *  cycle 7 depending on whether a 0 or a 1
+ *  needs to be transmitted, and one to set the output to low at
+ *  cycle 15 (no need to do this conditionally since setting the
+ *  output to low while it's low already has no effect.
+ *
+ *  This leaves 16 cycles per 20 cycles for the other instruction
+ *  streams.  Due to the use of the skip-if-bit-in-register-set
+ *  (sbrs) instruction for the conditional, no flags are touched.
+ *
+ *
+ *  == Stream 2: Read data from SPI, store it in a buffer ==
+ *
+ *  The attiny85 does not have dedicated SPI hardware. Instead, we
+ *  make use of a generic serial interface called USI.  USI has
+ *  a data register (USIDR) which is used to shift data in and out.
+ *  The USI status register (USISR) amongst other things contains
+ *  a 4-bit clock counter, which is increased every time the clock
+ *  signal changes (so twice per bit.)  USISR also contains an
+ *  overflow flag which is set when the counter overflows.
+ *
+ *  The buffer register USIBR is supposed to hold the data present
+ *  at the last counter overflow.  However, in slave mode (external
+ *  clock) this register appears to be unreliable, the high bit
+ *  reads 0 most of the time.
+ *
+ *  As a workaround, we poll for a counter overflow every 5 cycles.
+ *  To save cycles, we batch-save USISR and USIDR in registers (AVR
+ *  has 32 anyway) and check the last-saved USISR for the overflow
+ *  flag.  If the overflow flag is set, we jump to a different piece
+ *  of code (with identical instructions for the other instruction
+ *  streams.)  Since a byte just arrived, we can assume the next
+ *  byte will take longer than the next 20-cycle chunk, and we do
+ *  not need to poll.  Instead, we figure out the earliest check
+ *  at which USISR had the overflow bit set and use the
+ *  corresponding saved data register (subsequent data registers
+ *  may contain bits from the next transmitted byte already.)
+ *
+ *  There seems to be a problem both with using the out and sbi
+ *  instructions on USISR to clear the overflow flag.  Out also
+ *  writes to the 4-bit counter (which may have progressed from
+ *  0 already.) Sbi should, according to the datasheet, affect
+ *  the counter, but possibly due to us using an external clock,
+ *  there may be a race condition there, leading to the counter
+ *  not being updated when it should.
+ *
+ *  By accident I discovered that reading the USIBR also clears
+ *  the overflow counter.  This seems to be an undocumented
+ *  side-effect.  We have not encountered any race conditions from
+ *  clearing the overflow flag by reading USIBR.
+ *
+ *  Control Flow Graph:
+ *           ______           ___
+ *          /      |         |   \
+ *         |    ___V___   ___V___ \
+ *  bit 7  |   | poll  | | store | |
+ *         |   |_______| |_______| |
+ *         |       |   \ /         |
+ *         |       |    \          |
+ *         |    ___V___/ \_______  |
+ *  bit 6  |   | poll  | | store | |
+ *         |   |_______| |_______| |
+ *         |       |   \ /         |
+ *         |       |    \          |
+ *         |    ___V___/ \_______  |
+ *  bit 5  |   | poll  | | store | |
+ *         |   |_______| |_______| |
+ *         |       |   \ /         |
+ *         |       |    \          |
+ *         |    ___V___/ \_______  |
+ *  bit 4  |   | poll  | | store | |
+ *         |   |_______| |_______| |
+ *         |       |   \ /         |
+ *         |       |    \          |
+ *         |    ___V___/ \_______  |
+ *  bit 3  |   | poll  | | store | |
+ *         |   |_______| |_______| |
+ *         |       |   \ /         |
+ *         |       |    \          |
+ *         |    ___V___/ \_______  |
+ *  bit 2  |   | poll  | | store | |
+ *         |   |_______| |_______| |
+ *         |       |   \ /         |
+ *         |       |    \          |
+ *         |    ___V___/ \_______  |
+ *  bit 1  |   | poll  | | store | |
+ *         |   |_______| |_______| |
+ *         |       |   \ /         |
+ *         |       |    \          |
+ *         |    ___V___/ \_______  |
+ *  bit 0  |   | poll  | | store | |
+ *         |   |_______| |_______| |
+ *          \______|____\ _/       |
+ *                       \_________/
+ *
+ *  Now we need to store the byte in memory.  We use the attiny's
+ *  complete SRAM 0x60 - 0x260 as circular buffer.  Two of AVR's
+ *  three pointers are used to point to the current start and end of
+ *  the data.  Storing a byte in the buffer takes 2 cycles using a
+ *  store-and-increment operation. An end-of-buffer check (resetting
+ *  the pointer to the start of the buffer) is done before the next
+ *  store operation, or at least once per iteration (to handle the
+ *  corner case in which the total number of read bytes is a
+ *  multiple of the buffer size.)
+ *
+ *  The code is not designed to handle a full buffer well.  In case
+ *  of a full buffer, the code will most probably skip 512 bytes of
+ *  data.
+ *
+ *
+ *  == Stream 3: Detect stop condition / Read data from the buffer.
+ *
+ *  - Compare pLOAD and pSTORE, if they are equal, assume the buffer
+ *    is empty, exit.
+ *
+ *  - (If not,) load the rDATA register from the circular buffer.
+ *
+ *  This code must leave alone any flags set by stream 2
+ *
+ *  To save cycles where they are most needed, the jump that makes
+ *  this code a big loop in is actually in the middle of bit 7
+ *  instead of at the end.
+ *
  */
 
 #include <avr/io.h>
@@ -164,7 +311,8 @@ eor rSTATUS1, rSTATUS1
 
 rjmp bit7_poll
 
-              /* BIT BANG */                    /* BUFFER STORES */                    /* BUFFER LOADS */
+
+              /* BIT BANG */                    /* SPI INPUT & BUFFER STORES */        /* BUFFER LOADS */
 
               /* None of the bitbanging functions touch the flags, yay \o/ */
 
