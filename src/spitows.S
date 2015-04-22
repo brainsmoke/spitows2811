@@ -221,10 +221,6 @@
 #define OUTPORT PORTB
 #define BUFCACHE 3 /* start transmitting as soon as 3 bytes have been received */
 
-#if ( BUFCACHE > 255 ) != 0
-	#error "buffer cache size should fit in a 8 bit register"
-#endif
-
 #define TIMEOUT_CYCLES (50*16)
 #define TIMEOUT_LOOP_COUNT(cycles, cycles_per_iteration) ( (cycles+cycles_per_iteration-1)/cycles_per_iteration )
 
@@ -247,6 +243,7 @@
 #define rDATA r21
 #define rHIBUFEND r22
 #define rSAVEDSREG r23
+#define rHIBUFCACHE r24
 
 #define loLOAD r26
 #define hiLOAD r27
@@ -272,6 +269,7 @@ init:
 ldi rLOW, 0                   /* bitbang low                                                */
 ldi rHIGH, _BV(OUTPIN)        /* bitbang high                                               */
 ldi rHIBUFEND, hi8(BUFEND)    /* register needed for compare-with-carry                     */
+ldi rHIBUFCACHE, hi8(BUFSTART+BUFCACHE) /* register needed for compare-with-carry           */
 ldi loBUF, lo8(BUFSTART)      /* use Z to store a pointer to the start of the buffer        */
 ldi hiBUF, hi8(BUFSTART)      /*                                                            */
 
@@ -313,6 +311,7 @@ cache_data:
 in rUNUSED, _SFR_IO_ADDR(USIBR)  /* clears USIOIF in one cycle */
 st pSTORE+, rNEWDATA
 cpi loSTORE, lo8(BUFSTART+BUFCACHE)
+cpc hiSTORE, rHIBUFCACHE
 brne cache_loop
 ld rDATA, pLOAD+
 eor rSTATUS1, rSTATUS1
