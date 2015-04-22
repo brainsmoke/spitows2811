@@ -58,7 +58,7 @@
  *  The main loop consists of three interleaved instruction streams
  *  divided into 8 parts of 20 cycles, during one loop iteration
  *  one byte will be output using the WS2811 protocol.  One bit
- *  during each 20 cycle part.
+ *  is sent per 20 cycle part.
  *
  *  == Stream 1: Bit banging ==
  *
@@ -79,7 +79,7 @@
  *  cycle 7 depending on whether a 0 or a 1
  *  needs to be transmitted, and one to set the output to low at
  *  cycle 15 (no need to do this conditionally since setting the
- *  output to low while it's low already has no effect.
+ *  output to low while it's low already has no effect.)
  *
  *  This leaves 16 cycles per 20 cycles for the other instruction
  *  streams.  Due to the use of the skip-if-bit-in-register-set
@@ -101,25 +101,33 @@
  *  clock) this register appears to be unreliable, the high bit
  *  reads 0 most of the time.
  *
+ *  === USIBR broken in slave mode? ===
+ *
  *  As a workaround, we poll for a counter overflow every 5 cycles.
- *  To save cycles, we batch-save USISR and USIDR in registers (AVR
- *  has 32 anyway) and check the last-saved USISR for the overflow
- *  flag.  If the overflow flag is set, we jump to a different piece
- *  of code (with identical instructions for the other instruction
- *  streams.)  Since a byte just arrived, we can assume the next
- *  byte will take longer than the next 20-cycle chunk, and we do
- *  not need to poll.  Instead, we figure out the earliest check
- *  at which USISR had the overflow bit set and use the
- *  corresponding saved data register (subsequent data registers
- *  may contain bits from the next transmitted byte already.)
+ *  In a 20 cycle period, we store USISR and USIDR 4 times in
+ *  registers (AVR has 32 anyway) but we do not immediately check if
+ *  the overflow bit is set.  After 4 times we see if the last saved
+ *  value of USISR contains the overflow flag.  If this turns out to
+ *  be the case, we jump to a different piece of code (with
+ *  identical instructions for the other instruction streams.)
+ *  Since we just received a byte, we can assume the next byte will
+ *  take longer than the next 20-cycle chunk, and we do not need to
+ *  poll, this gives us some room for different instructions.  We
+ *  use these instructions to search backwards in the 4 pairs of
+ *  saved registers to the first occurence of the overflow bit
+ *  and use the corresponding saved value of USIDR as the data we
+ *  should have read.  (Subsequent data registers may contain bits
+ *  from the next transmitted byte already.)
+ *
+ *  === sbi broken in slave mode? ===
  *
  *  There seems to be a problem both with using the out and sbi
  *  instructions on USISR to clear the overflow flag.  Out also
  *  writes to the 4-bit counter (which may have progressed from
- *  0 already.) Sbi should, according to the datasheet, affect
- *  the counter, but possibly due to us using an external clock,
- *  there may be a race condition there, leading to the counter
- *  not being updated when it should.
+ *  0 already.)  According to the datasheet sbi should not affect
+ *  the counter. However, it appears that a clock tick when
+ *  triggered during the execution of an sbi instruction sometimes
+ *  does not increase the conter.
  *
  *  By accident I discovered that reading the USIBR also clears
  *  the overflow counter.  This seems to be an undocumented
