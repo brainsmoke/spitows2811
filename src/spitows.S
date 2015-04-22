@@ -221,8 +221,9 @@ bit5_poll:
 /* 6 + 1|0 */ out _SFR_IO_ADDR(OUTPORT), rLOW
 /* 7 +  1  */                                   in rSTATUS2,    _SFR_IO_ADDR(USISR)
 /* 8 +  1  */                                   in rSHIFTDATA2, _SFR_IO_ADDR(USIDR)
-/* 9 +  1  */                                                                          nop
-/*10 +  1  */                                                                          nop
+/* 9 + 1|2 */                                   brne 1f
+/*10 + 1|0 */                                   movw loSTORE, loBUF   /* make sure the pLOAD == pSTORE (exit condition) is on buffer-boundary */
+1:                                                                    /* wrapped pointers (assuming no more bytes are read this iteration) */
 /*11 +  1  */                                                                          nop
 /*12 +  1  */                                   in rSTATUS3,    _SFR_IO_ADDR(USISR)
 /*13 +  1  */                                   in rNEWDATA,    _SFR_IO_ADDR(USIDR)
