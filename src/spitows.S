@@ -96,12 +96,12 @@
  *  signal changes (so twice per bit.)  USISR also contains an
  *  overflow flag which is set when the counter overflows.
  *
+ *  === USIBR broken in slave mode? ===
+ *
  *  The buffer register USIBR is supposed to hold the data present
  *  at the last counter overflow.  However, in slave mode (external
  *  clock) this register appears to be unreliable, the high bit
  *  reads 0 most of the time.
- *
- *  === USIBR broken in slave mode? ===
  *
  *  As a workaround, we poll for a counter overflow every 5 cycles.
  *  In a 20 cycle period, we store USISR and USIDR 4 times in
