@@ -544,7 +544,7 @@ bit7_store:
 /*15 +  1  */                                                                          nop
 /*16 +  1  */                                                                          nop
 /*17 +  1  */                                                                          nop
-/*18 +  1  */                                   rjmp bit6_poll
+/*18 +  2  */                                   rjmp bit6_poll
 
 
 
@@ -569,7 +569,7 @@ bit6_store:
 /*15 +  1  */                                                                          nop
 /*16 +  1  */                                                                          nop
 /*17 +  1  */                                                                          nop
-/*18 +  1  */                                   rjmp bit5_poll
+/*18 +  2  */                                   rjmp bit5_poll
 
 
 
@@ -594,7 +594,7 @@ bit5_store:
 /*15 +  1  */                                                                          nop
 /*16 +  1  */                                                                          nop
 /*17 +  1  */                                                                          nop
-/*18 +  1  */                                   rjmp bit4_poll
+/*18 +  2  */                                   rjmp bit4_poll
 
 
 
@@ -619,7 +619,7 @@ bit4_store:
 /*15 +  1  */                                                                          cpi loLOAD, lo8(BUFEND)
 /*16 +  1  */                                                                          cpc hiLOAD, rHIBUFEND
 /*17 +  1  */                                                                          in rSAVEDSREG, _SFR_IO_ADDR(SREG)
-/*18 +  1  */                                   rjmp bit3_poll
+/*18 +  2  */                                   rjmp bit3_poll
 
 
 
@@ -644,7 +644,7 @@ bit3_store:
 /*15 + 1|2 */                                                                          sbrc rSAVEDSREG, SREG_Z
 /*16 + 1|0 */                                                                          movw loLOAD, loBUF
 /*17 +  1  */                                                                          nop
-/*18 +  1  */                                   rjmp bit2_poll
+/*18 +  2  */                                   rjmp bit2_poll
 
 
 
@@ -669,7 +669,7 @@ bit2_store:
 /*15 +  1  */                                                                          eor rSAVEDSREG, rSAVEDSREG /* clear Z flag, as there is data in the buffer */
 /*16 +  1  */                                                                          nop
 /*17 +  1  */                                                                          nop
-/*18 +  1  */                                   rjmp bit1_poll
+/*18 +  2  */                                   rjmp bit1_poll
 
 
 
@@ -694,7 +694,7 @@ bit1_store:
 /*15 +  1  */                                                                          nop /* poll version checked for data */
 /*16 +  1  */                                                                          nop /* we know there is as data was  */
 /*17 +  1  */                                                                          nop /* just stored                   */
-/*18 +  1  */                                   rjmp bit0_poll
+/*18 +  2  */                                   rjmp bit0_poll
 
 
 
